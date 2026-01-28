@@ -1,0 +1,14 @@
+{
+  "separator": " **AMS** ",
+  "fields": [
+    "title",
+    "artist",
+    "trivia",
+    "category",
+    "duration",
+    "cart",
+    "media_type",
+    "IRSC"
+  ]
+}
+

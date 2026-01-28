@@ -1,0 +1,18 @@
+services:
+  aac-encoder:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./HLS:/app/HLS
+    environment:
+      - AAC_ENCODER_CONFIG=/app/config/config.json
+    restart: unless-stopped
+    networks:
+      - encoder-net
+
+networks:
+  encoder-net:
+    driver: bridge

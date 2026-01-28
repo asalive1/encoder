@@ -1,0 +1,30 @@
+{
+    "webPort": 8080,
+    "iceEnabled": false,
+    "iceMetaEnabled": true,
+    "icecastUrl": "http://icecast-server:8000/stream",
+    "user": "source",
+    "pass": "password",
+    "amperwaveStationId": "DOCKER_STATION",
+    "logDir": "/app/logs",
+    
+    "bitrate": 128000,
+    "channels": 2,
+    "sampleRate": 48000,
+    "deviceIndex": -1,
+    "listenPort": 9000,
+    "icyMetaInt": 8192,
+    
+    "inputType": "rtp",
+    "rtpAddress": "239.192.1.1",
+    "rtpPort": 5004,
+    "rtpInterface": "eth0",
+    "icecastInterface": "eth0",
+    "rtpGain": 1.0,
+    
+    "hlsEnabled": true,
+    "hlsSegmentSeconds": 6,
+    "hlsWindow": 5,
+    "hlsPath": "/app/HLS",
+    "hlsMetaEnabled": true
+}

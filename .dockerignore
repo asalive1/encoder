@@ -1,0 +1,11 @@
+build/
+cmake-build-*/
+.git/
+.idea/
+.claude/
+*.log
+logs/
+HLS/
+*.md
+test_*.sh
+.gitignore

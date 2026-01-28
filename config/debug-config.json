@@ -1,0 +1,6 @@
+{
+    "webPort": 8080,
+    "iceEnabled": false,
+    "hlsEnabled": false,
+    "logDir": "/app/logs"
+}

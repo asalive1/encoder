@@ -1,0 +1,29 @@
+# CLion / CMake build directories
+#cmake-build-*/
+build/
+out/
+
+# CMake cache and files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+
+# IDE metadata
+.idea/
+
+# Binaries / libs
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+*.exe
+
+# Logs
+*.log
+
+# Misc
+.DS_Store

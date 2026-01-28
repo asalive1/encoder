@@ -1,0 +1,51 @@
+# Build stage
+FROM ubuntu:24.04 AS builder
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    pkg-config \
+    portaudio19-dev \
+    libxml2-dev \
+    libssl-dev \
+    libfdk-aac-dev \
+    libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY . .
+
+RUN mkdir -p build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make encoder && \
+    strip encoder
+
+# Runtime stage
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y \
+    libportaudio2 \
+    libxml2 \
+    libssl3 \
+    libfdk-aac2 \
+    libcurl4 \
+    && rm -rf /var/lib/apt/lists/* \
+    && (id -u 1000 >/dev/null 2>&1 || useradd -r -s /bin/false -u 1000 encoder)
+
+WORKDIR /app
+
+# Copy only the binary
+COPY --from=builder /build/build/encoder .
+
+# Create directories
+RUN mkdir -p config logs HLS && \
+    chown -R 1000:1000 /app && \
+    chmod -R 755 /app
+
+USER 1000
+
+EXPOSE 8080
+
+ENV AAC_ENCODER_CONFIG=/app/config/config.json
+
+CMD ["./encoder", "--headless"]

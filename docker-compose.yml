@@ -1,6 +1,10 @@
 services:
   aac-encoder:
-    build: .
+    image: ghcr.io/asalive1/encoder:latest
+    # Authentication required for private registry:
+    # Run: docker login ghcr.io
+    # Use GitHub username and Personal Access Token (PAT) as password
+    # Or set DOCKER_USERNAME and DOCKER_PASSWORD environment variables
     ports:
       - "8080:8080"
     volumes:

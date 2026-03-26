@@ -646,8 +646,15 @@ std::string parseMetadataXML(const std::string& xml, const std::string& stationI
         oss << tmpl;
         logMessage("[metadata] template result: " + oss.str());
     } else {
-        // --- Legacy mode: prepend stationId then append field values with separator ---
-        oss << stationId;
+        // --- Legacy mode: optionally prepend stationId then append field values with separator ---
+        // "includeStationId" defaults to true for backward compatibility
+        bool includeStationId = true;
+        if (mapping.contains("includeStationId") && mapping["includeStationId"].is_boolean()) {
+            includeStationId = mapping["includeStationId"].get<bool>();
+        }
+        if (includeStationId) {
+            oss << stationId;
+        }
 
         // Default separator is " | " if not specified
         std::string sep = " | ";
@@ -656,13 +663,16 @@ std::string parseMetadataXML(const std::string& xml, const std::string& stationI
         }
 
         if (mapping.contains("fields") && mapping["fields"].is_array()) {
+            bool first = !includeStationId; // skip leading separator when stationId is omitted
             for (const auto& field : mapping["fields"]) {
                 std::string tag = field.get<std::string>();
                 std::string val = getText(root, tag.c_str());
-                oss << sep << val;
+                if (!first) oss << sep;
+                oss << val;
+                first = false;
             }
         } else {
-            // Fallback: no mapping -> produce just stationId
+            // Fallback: no mapping -> produce just stationId (or empty string)
             logMessage("[metadata] iceDataParse missing 'fields' array, using stationId only");
         }
     }

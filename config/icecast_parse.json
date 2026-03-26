@@ -1,6 +1,32 @@
 {
-  "separator": " | ",
+  "_doc": [
+    "icecast_parse.json — controls how metadata is embedded into AAC/MP3 Icecast streams.",
+    "",
+    "TEMPLATE MODE (recommended)",
+    "  Set 'template' to a string containing {placeholder} tokens.",
+    "  Any XML field name can be used as a placeholder, e.g. {artist}, {title},",
+    "  {trivia}, {category}, {duration}, {cart}, {media_type}, {IRSC}.",
+    "  The station ID (from config.json 'amperwaveStationId') is available as {stationId}.",
+    "  To omit the station ID entirely, simply leave {stationId} out of the template.",
+    "  Examples:",
+    "    artist={artist} | title={title}",
+    "    {stationId} — {artist}: {title}",
+    "    [{cart}] {artist} - {title} ({duration}s)",
+    "",
+    "LEGACY MODE (fields list)",
+    "  Used when 'template' is absent. Fields are joined with 'separator'.",
+    "  'includeStationId': true  => station ID is prepended before the first field (default).",
+    "  'includeStationId': false => station ID is omitted; fields are joined directly.",
+    "  'separator': string placed between each value (default: ' | ').",
+    "  'fields': ordered list of XML field names to include.",
+    "",
+    "NOTE: The '_doc' key is ignored by the encoder and exists solely for documentation."
+  ],
+
   "template": "artist={artist} | title={title}",
+
+  "includeStationId": false,
+  "separator": " | ",
   "fields": [
     "title",
     "artist",

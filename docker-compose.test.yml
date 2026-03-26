@@ -7,7 +7,7 @@ services:
       - "9000:9000"    # metadata/Now Playing XML  (config.json listenPort: 9000)
       - "9010:9010"    # control port  (config.json controlPort: 9010)
     volumes:
-      - ./config:/app/config
+      - ./config:/app/build/config   # encoder resolves config relative to its own directory (/app/build)
       - ./logs:/app/logs
       - ./HLS:/app/HLS
     environment:

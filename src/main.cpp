@@ -613,25 +613,59 @@ std::string parseMetadataXML(const std::string& xml, const std::string& stationI
 
     // Build output using mapping fields
     std::ostringstream oss;
-    oss << stationId;
 
-    // Default separator is " | " if not specified
-    std::string sep = " | ";
-    if (mapping.contains("separator") && mapping["separator"].is_string()) {
-        sep = mapping["separator"].get<std::string>();
-    }
+    // --- Template mode: if "template" key is present, use {field} substitution ---
+    if (mapping.contains("template") && mapping["template"].is_string()) {
+        std::string tmpl = mapping["template"].get<std::string>();
 
-    if (mapping.contains("fields") && mapping["fields"].is_array()) {
-        for (const auto& field : mapping["fields"]) {
-            std::string tag = field.get<std::string>();
+        // Helper lambda: replace all occurrences of 'from' with 'to' in 'str'
+        auto replaceAll = [](std::string str, const std::string& from, const std::string& to) -> std::string {
+            size_t pos = 0;
+            while ((pos = str.find(from, pos)) != std::string::npos) {
+                str.replace(pos, from.size(), to);
+                pos += to.size();
+            }
+            return str;
+        };
+
+        // Support {stationId} as a special placeholder
+        tmpl = replaceAll(tmpl, "{stationId}", stationId);
+
+        // Collect all XML field names referenced in the template and substitute them
+        // We scan the template for {tagname} patterns and look each up in the XML
+        size_t start = 0;
+        while ((start = tmpl.find('{', start)) != std::string::npos) {
+            size_t end = tmpl.find('}', start);
+            if (end == std::string::npos) break;
+            std::string tag = tmpl.substr(start + 1, end - start - 1);
             std::string val = getText(root, tag.c_str());
-            oss << sep << val;
+            tmpl = replaceAll(tmpl, "{" + tag + "}", val);
+            start = 0; // restart scan after substitution
         }
-    } else {
-        // Fallback: no mapping -> produce just stationId
-        logMessage("[metadata] iceDataParse missing 'fields' array, using stationId only");
-    }
 
+        oss << tmpl;
+        logMessage("[metadata] template result: " + oss.str());
+    } else {
+        // --- Legacy mode: prepend stationId then append field values with separator ---
+        oss << stationId;
+
+        // Default separator is " | " if not specified
+        std::string sep = " | ";
+        if (mapping.contains("separator") && mapping["separator"].is_string()) {
+            sep = mapping["separator"].get<std::string>();
+        }
+
+        if (mapping.contains("fields") && mapping["fields"].is_array()) {
+            for (const auto& field : mapping["fields"]) {
+                std::string tag = field.get<std::string>();
+                std::string val = getText(root, tag.c_str());
+                oss << sep << val;
+            }
+        } else {
+            // Fallback: no mapping -> produce just stationId
+            logMessage("[metadata] iceDataParse missing 'fields' array, using stationId only");
+        }
+    }
 
     xmlFreeDoc(doc);
     return oss.str();

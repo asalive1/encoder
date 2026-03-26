@@ -1,5 +1,6 @@
 {
   "separator": " | ",
+  "template": "artist={artist} | title={title}",
   "fields": [
     "title",
     "artist",

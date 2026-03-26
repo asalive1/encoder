@@ -1,9 +1,11 @@
 services:
   aac-encoder:
     image: ghcr.io/asalive1/encoder:test
-    command: ["./build/encoder"]   # no --headless: enables web UI on webPort
+    command: ["./build/encoder"]   # no --headless: enables web UI
     ports:
-      - "8050:8080"                # host:container — access via http://server:8050
+      - "8050:8020"    # web UI  (config.json webPort: 8020)
+      - "9000:9000"    # metadata/Now Playing XML  (config.json listenPort: 9000)
+      - "9010:9010"    # control port  (config.json controlPort: 9010)
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs

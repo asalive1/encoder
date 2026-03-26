@@ -1,21 +1,17 @@
 services:
   aac-encoder:
     image: ghcr.io/asalive1/encoder:test
-    command: ["./build/encoder"]   # no --headless: enables web UI
-    ports:
-      - "8050:8020"    # web UI  (config.json webPort: 8020)
-      - "9000:9000"    # metadata/Now Playing XML  (config.json listenPort: 9000)
-      - "9010:9010"    # control port  (config.json controlPort: 9010)
+    command: ["./build/encoder"]
+    network_mode: host    # required for RTP multicast — bridge networking blocks IGMP/multicast
+    # With host networking, ports are exposed directly on the host (no mapping needed):
+    #   Web UI:      http://server:8020   (config.json webPort)
+    #   Metadata:    server:9000          (config.json listenPort)
+    #   Control:     server:9010          (config.json controlPort)
+    #   RTP audio:   239.192.x.x:5004     (config.json rtpAddress/rtpPort - multicast)
     volumes:
-      - ./config:/app/build/config   # encoder resolves config relative to its own directory (/app/build)
+      - ./config:/app/build/config
       - ./logs:/app/logs
       - ./HLS:/app/HLS
     environment:
-      - AAC_ENCODER_CONFIG=/app/config/config.json
+      - AAC_ENCODER_CONFIG=/app/build/config/config.json
     restart: unless-stopped
-    networks:
-      - encoder-net
-
-networks:
-  encoder-net:
-    driver: bridge

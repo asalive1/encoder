@@ -1,4 +1,15 @@
 {
+  "_doc": [
+    "This is the active parse file referenced by config.json (iceDataParse: icecast_test.json).",
+    "Edit 'template' to customise the metadata string embedded into AAC/MP3 streams.",
+    "Available placeholders: {artist}, {title}, {trivia}, {category}, {duration},",
+    "  {cart}, {media_type}, {IRSC}, {stationId}",
+    "Remove the 'template' key entirely to fall back to legacy fields+separator mode."
+  ],
+
+  "template": "artist={artist} | title={title}",
+
+  "includeStationId": false,
   "separator": " **AMS** ",
   "fields": [
     "title",
@@ -11,4 +22,3 @@
     "IRSC"
   ]
 }
-

@@ -1,0 +1,17 @@
+services:
+  aac-encoder:
+    image: ghcr.io/asalive1/encoder:test
+    command: ["./build/encoder"]
+    network_mode: host    # required for RTP multicast — bridge networking blocks IGMP/multicast
+    # With host networking, ports are exposed directly on the host (no mapping needed):
+    #   Web UI:      http://server:8020   (config.json webPort)
+    #   Metadata:    server:9000          (config.json listenPort)
+    #   Control:     server:9010          (config.json controlPort)
+    #   RTP audio:   239.192.x.x:5004     (config.json rtpAddress/rtpPort - multicast)
+    volumes:
+      - ./config:/app/build/config
+      - ./logs:/app/logs
+      - ./HLS:/app/HLS
+    environment:
+      - AAC_ENCODER_CONFIG=/app/build/config/config.json
+    restart: unless-stopped

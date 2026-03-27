@@ -200,6 +200,7 @@ struct Config {
     bool        hlsEnabled = false;           // enable/disable HLS engine
     int         hlsSegmentSeconds = 6;        // duration target per segment
     int         hlsWindow = 5;                // number of segments in the playlist window
+    int         hlsStartTimeOffset = 0;       // EXT-X-START TIME-OFFSET in seconds (0 = oldest segment, negative = from live edge)
     std::string hlsPath;                      // optional override; default to getProgramDir()+"/HLS"
     bool        hlsMetaEnabled = true;     // enable/disable JSON on EXTINF
     std::string hlsMetaFile;               // path to JSON file for test runs (e.g., "<program>/HLS/metadata.json")
@@ -1032,6 +1033,7 @@ bool saveConfigToFile(const Config& cfg, const std::string& filename = "") {
         {"hlsEnabled", cfg.hlsEnabled},
         {"hlsSegmentSeconds", cfg.hlsSegmentSeconds},
         {"hlsWindow", cfg.hlsWindow},
+        {"hlsStartTimeOffset", cfg.hlsStartTimeOffset},
         {"hlsPath", cfg.hlsPath},
         {"hlsMetaEnabled", cfg.hlsMetaEnabled},
         // NEW: backend-only field written to disk; you may omit from /getconfig if desired
@@ -1089,11 +1091,12 @@ bool loadConfigFromFile(Config& cfg, const std::string& filename = "") {
 
     // HLS
 
-    cfg.hlsEnabled        = j.value("hlsEnabled", cfg.hlsEnabled);
-    cfg.hlsSegmentSeconds = j.value("hlsSegmentSeconds", cfg.hlsSegmentSeconds);
-    cfg.hlsWindow         = j.value("hlsWindow", cfg.hlsWindow);
-    cfg.hlsPath           = j.value("hlsPath", cfg.hlsPath);
-    cfg.hlsMetaEnabled    = j.value("hlsMetaEnabled", cfg.hlsMetaEnabled);
+    cfg.hlsEnabled          = j.value("hlsEnabled", cfg.hlsEnabled);
+    cfg.hlsSegmentSeconds   = j.value("hlsSegmentSeconds", cfg.hlsSegmentSeconds);
+    cfg.hlsWindow           = j.value("hlsWindow", cfg.hlsWindow);
+    cfg.hlsStartTimeOffset  = j.value("hlsStartTimeOffset", cfg.hlsStartTimeOffset);
+    cfg.hlsPath             = j.value("hlsPath", cfg.hlsPath);
+    cfg.hlsMetaEnabled      = j.value("hlsMetaEnabled", cfg.hlsMetaEnabled);
     cfg.configDir = j.value("configDir", "");
 
     return true;
@@ -2123,7 +2126,7 @@ void hlsBuildPlaylist(HlsState& hs, int currentSeq, int window, int targetDurati
 
         // Only include these tags when metadata is enabled
         pl << "#EXT-X-INDEPENDENT-SEGMENTS\n";
-        pl << "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n";
+        pl << "#EXT-X-START:TIME-OFFSET=" << cfgCopy.hlsStartTimeOffset << ",PRECISE=YES\n";
     }
 
     const bool playlistAtRoot = (hs.playlist.rfind("/index.m3u8") != std::string::npos);
@@ -3912,6 +3915,7 @@ void runWebUI(AudioState& audio, AacState& aac,
             {"hlsEnabled", g_config.hlsEnabled},
             {"hlsSegmentSeconds", g_config.hlsSegmentSeconds},
             {"hlsWindow", g_config.hlsWindow},
+            {"hlsStartTimeOffset", g_config.hlsStartTimeOffset},
             {"hlsPath", g_config.hlsPath},
             {"hlsMetaEnabled", g_config.hlsMetaEnabled}
         };
@@ -4109,11 +4113,12 @@ void runWebUI(AudioState& audio, AacState& aac,
             if (j.contains("rtpGain")) newCfg.rtpGain = j["rtpGain"].is_number() ? j["rtpGain"].get<float>() : std::stof(j["rtpGain"].get<std::string>());
 
             //HLS
-            if (j.contains("hlsEnabled"))        newCfg.hlsEnabled = j["hlsEnabled"].get<bool>();
-            if (j.contains("hlsMetaEnabled"))    newCfg.hlsMetaEnabled = j["hlsMetaEnabled"].get<bool>();
-            if (j.contains("hlsSegmentSeconds")) newCfg.hlsSegmentSeconds = j["hlsSegmentSeconds"].get<int>();
-            if (j.contains("hlsWindow"))         newCfg.hlsWindow = j["hlsWindow"].get<int>();
-            if (j.contains("hlsPath"))           newCfg.hlsPath = j["hlsPath"].get<std::string>();
+            if (j.contains("hlsEnabled"))           newCfg.hlsEnabled = j["hlsEnabled"].get<bool>();
+            if (j.contains("hlsMetaEnabled"))         newCfg.hlsMetaEnabled = j["hlsMetaEnabled"].get<bool>();
+            if (j.contains("hlsSegmentSeconds"))      newCfg.hlsSegmentSeconds = j["hlsSegmentSeconds"].get<int>();
+            if (j.contains("hlsWindow"))              newCfg.hlsWindow = j["hlsWindow"].get<int>();
+            if (j.contains("hlsStartTimeOffset"))     newCfg.hlsStartTimeOffset = j["hlsStartTimeOffset"].get<int>();
+            if (j.contains("hlsPath"))                newCfg.hlsPath = j["hlsPath"].get<std::string>();
 
             { std::lock_guard<std::mutex> lock(g_configMutex);
               g_config = newCfg;
@@ -4186,11 +4191,12 @@ svr.Post("/configsaveas", [&](const httplib::Request& req, httplib::Response& re
         if (j.contains("rtpInterface")) cfg.rtpInterface = j["rtpInterface"].get<std::string>();
         if (j.contains("icecastInterface")) cfg.icecastInterface = j["icecastInterface"].get<std::string>();
         if (j.contains("rtpGain")) cfg.rtpGain = j["rtpGain"].is_number() ? j["rtpGain"].get<float>() : std::stof(j["rtpGain"].get<std::string>());
-        if (j.contains("hlsEnabled"))        cfg.hlsEnabled = j["hlsEnabled"].get<bool>();
-        if (j.contains("hlsMetaEnabled"))    cfg.hlsMetaEnabled = j["hlsMetaEnabled"].get<bool>();
-        if (j.contains("hlsSegmentSeconds")) cfg.hlsSegmentSeconds = j["hlsSegmentSeconds"].get<int>();
-        if (j.contains("hlsWindow"))         cfg.hlsWindow = j["hlsWindow"].get<int>();
-        if (j.contains("hlsPath"))           cfg.hlsPath = j["hlsPath"].get<std::string>();
+        if (j.contains("hlsEnabled"))           cfg.hlsEnabled = j["hlsEnabled"].get<bool>();
+        if (j.contains("hlsMetaEnabled"))         cfg.hlsMetaEnabled = j["hlsMetaEnabled"].get<bool>();
+        if (j.contains("hlsSegmentSeconds"))      cfg.hlsSegmentSeconds = j["hlsSegmentSeconds"].get<int>();
+        if (j.contains("hlsWindow"))              cfg.hlsWindow = j["hlsWindow"].get<int>();
+        if (j.contains("hlsStartTimeOffset"))     cfg.hlsStartTimeOffset = j["hlsStartTimeOffset"].get<int>();
+        if (j.contains("hlsPath"))                cfg.hlsPath = j["hlsPath"].get<std::string>();
 
         if (!saveConfigToFile(cfg, filename)) {
             res.status = 500;
@@ -4328,7 +4334,8 @@ svr.Get("/", [&](const httplib::Request&, httplib::Response& res) {
         "<label><input id='hlsEnabled' type='checkbox'> Enable HLS</label><br>"
         "<label><input id='hlsMetaEnabled' type='checkbox'> Embed Metadata in HLS</label><br>"
         "Segment Seconds: <input id='hlsSegmentSeconds' type='number' min='2' max='20'><br>"
-        "Window (segments): <input id='hlsWindow' type='number' min='3' max='20'><br>"
+        "Window (segments): <input id='hlsWindow' type='number' min='3' max='60'><br>"
+        "Start Time Offset (s): <input id='hlsStartTimeOffset' type='number' min='-300' max='0' title='EXT-X-START TIME-OFFSET. 0 = oldest segment, negative = seconds from live edge (e.g. -30)'><br>"
         "HLS Path (optional): <input id='hlsPath'><br>"
         "<div>Playlist URL: <code>/hls/index.m3u8</code></div>"
         "<button onclick=\"startHls()\">Start HLS</button>"
@@ -4391,6 +4398,7 @@ svr.Get("/", [&](const httplib::Request&, httplib::Response& res) {
 "      document.getElementById('hlsMetaEnabled').checked = !!cfg.hlsMetaEnabled; "
 "      document.getElementById('hlsSegmentSeconds').value = cfg.hlsSegmentSeconds || 6;"
 "      document.getElementById('hlsWindow').value = cfg.hlsWindow || 5;"
+"      document.getElementById('hlsStartTimeOffset').value = (cfg.hlsStartTimeOffset !== undefined) ? cfg.hlsStartTimeOffset : 0;"
 "      document.getElementById('hlsPath').value = cfg.hlsPath || '';"
 
 "    })"
@@ -4434,6 +4442,7 @@ svr.Get("/", [&](const httplib::Request&, httplib::Response& res) {
 "    hlsMetaEnabled: document.getElementById('hlsMetaEnabled').checked, "
 "    hlsSegmentSeconds: parseInt(document.getElementById('hlsSegmentSeconds').value),"
 "    hlsWindow: parseInt(document.getElementById('hlsWindow').value),"
+"    hlsStartTimeOffset: parseInt(document.getElementById('hlsStartTimeOffset').value),"
 "    hlsPath: document.getElementById('hlsPath').value,"
 
 "  };"

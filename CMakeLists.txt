@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(AACIceEncoderWebUI VERSION 1.0.3)
+project(AACIceEncoderWebUI VERSION 1.0.17)
 
 # Generate a header with version info
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in

@@ -3,7 +3,7 @@
 set -e
 
 IMAGE_NAME="aac-encoder"
-VERSION="1.0.14"
+VERSION="1.0.17"
 
 echo "=== AAC Encoder Docker Deployment ==="
 

@@ -1,22 +1,16 @@
 services:
   aac-encoder:
     image: ghcr.io/asalive1/encoder:latest
-    # Authentication required for private registry:
-    # Run: docker login ghcr.io
-    # Use GitHub username and Personal Access Token (PAT) as password
-    # Or set DOCKER_USERNAME and DOCKER_PASSWORD environment variables
-    ports:
-      - "8080:8080"
+    network_mode: host    # required for RTP multicast — bridge networking blocks IGMP/multicast
+    # With host networking, ports are exposed directly on the host (no mapping needed):
+    #   Web UI:      http://server:8020   (config.json webPort)
+    #   Metadata:    server:9000          (config.json listenPort)
+    #   Control:     server:9010          (config.json controlPort)
+    #   RTP audio:   multicast via rtpInterface in config.json
     volumes:
-      - ./config:/app/config
+      - ./config:/app/build/config
       - ./logs:/app/logs
       - ./HLS:/app/HLS
     environment:
-      - AAC_ENCODER_CONFIG=/app/config/config.json
+      - AAC_ENCODER_CONFIG=/app/build/config/config.json
     restart: unless-stopped
-    networks:
-      - encoder-net
-
-networks:
-  encoder-net:
-    driver: bridge

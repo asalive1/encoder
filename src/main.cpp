@@ -1415,28 +1415,40 @@ void metadataServer(int port) {
                 g_currentMetaXml = connBuffer;
             }
 
-            // Icecast / ICY metadata (pipe-separated; uses only the first <nowplaying> element
-            // because parseMetadataXML already does the right thing for single-element or
-            // multi-element payloads — it stops at the first root element which is the trigger)
-            std::string formatted = parseMetadataXML(connBuffer, stationId);
-            if (!formatted.empty()) {
-                {
-                    std::lock_guard<std::mutex> lock(g_metaMutex);
-                    g_currentMeta = formatted;
-                    g_metaHistory.push_front(formatted);
-                    if (g_metaHistory.size() > 5) g_metaHistory.pop_back();
-                }
-                logMessage("[metadataServer] Icecast Metadata updated: " + formatted);
-
-                // HLS JSON metadata — pass the full batch so current & upcoming are correct
-                auto j = buildHlsMetaJson(connBuffer, stationId);
-                if (!j.empty()) {
-                    std::lock_guard<std::mutex> lock(g_metaMutex);
-                    g_currentMetaJson = j.dump();
-                    logMessage("[metadataServer] HLS JSON metadata updated");
+            // parseMetadataXML expects a single-root XML document (it was written when the
+            // automation only sent one <nowplaying> at a time).  The batch from automation is
+            // multiple back-to-back root elements, which libxml2 rejects without a wrapper.
+            // Extract just the first <nowplaying>…</nowplaying> for ICY/Icecast output.
+            std::string firstElement;
+            {
+                const std::string closeTag = "</nowplaying>";
+                size_t endPos = connBuffer.find(closeTag);
+                if (endPos != std::string::npos) {
+                    firstElement = connBuffer.substr(0, endPos + closeTag.size());
                 } else {
-                    logMessage("[metadataServer] HLS JSON metadata build failed or empty");
+                    firstElement = connBuffer; // single element or malformed — use as-is
                 }
+            }
+
+            std::string formatted = parseMetadataXML(firstElement, stationId);
+            if (!formatted.empty()) {
+                std::lock_guard<std::mutex> lock(g_metaMutex);
+                g_currentMeta = formatted;
+                g_metaHistory.push_front(formatted);
+                if (g_metaHistory.size() > 5) g_metaHistory.pop_back();
+                logMessage("[metadataServer] Icecast Metadata updated: " + formatted);
+            }
+
+            // HLS JSON metadata — always process the full batch regardless of ICY result.
+            // buildHlsMetaJson wraps the batch in a synthetic root so libxml2 handles it,
+            // selects stack_pos=0 as current, and builds upcoming[] from the rest.
+            auto j = buildHlsMetaJson(connBuffer, stationId);
+            if (!j.empty()) {
+                std::lock_guard<std::mutex> lock(g_metaMutex);
+                g_currentMetaJson = j.dump();
+                logMessage("[metadataServer] HLS JSON metadata updated");
+            } else {
+                logMessage("[metadataServer] HLS JSON metadata build failed or empty");
             }
 
             connBuffer.clear();

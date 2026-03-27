@@ -23,23 +23,20 @@ RUN mkdir -p build && cd build && \
     cmake .. && \
     make encoder
 
-# Create runtime user (use existing ubuntu user if UID 1000 exists)
-RUN id -u 1000 >/dev/null 2>&1 || useradd -r -s /bin/false -u 1000 encoder
+# Create runtime directories
+# Config is resolved relative to the binary at /app/build, so config lives at /app/build/config
+# These directories are overridden at runtime by docker-compose volume mounts from the host
+RUN mkdir -p /app/build/config /app/logs /app/HLS /app/www && \
+    chmod -R 777 /app/build/config /app/logs /app/HLS /app/www
 
-# Create directories and set permissions
-# Config lives at /app/build/config — relative to the encoder binary location
-RUN mkdir -p /app/build/config /app/logs /app/HLS && \
-    chown -R 1000:1000 /app && \
-    chmod -R 755 /app
+# Run as root so the encoder can write to host-mounted volumes regardless of host directory ownership
+# (config saves, log rotation, HLS segment writes all require write access)
 
-# Expose web UI port (default webPort in config.json)
+# Expose web UI port (matches default webPort in config.json)
 EXPOSE 8020
 
-# Switch to non-root user
-USER 1000
-
-# Config path resolved relative to binary dir (/app/build)
+# Config path resolved relative to binary directory (/app/build)
 ENV AAC_ENCODER_CONFIG=/app/build/config/config.json
 
-# Default command — no --headless so the web UI is available
+# Default command — web UI enabled (no --headless)
 CMD ["./build/encoder"]

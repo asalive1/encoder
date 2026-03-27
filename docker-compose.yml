@@ -9,9 +9,10 @@ services:
     #   Control:     server:<controlPort>       (config.json controlPort)
     #   RTP audio:   multicast via rtpInterface in config.json
     volumes:
-      - ./config:/app/build/config   # mounted over image defaults — your local config takes precedence
-      - ./logs:/app/logs
-      - ./HLS:/app/HLS
+      - ./config:/app/build/config   # config.json, icecast_parse.json etc — read/write
+      - ./logs:/app/logs             # log files — read/write
+      - ./HLS:/app/HLS               # HLS segments — read/write
+      - ./www:/app/www               # web assets — read/write
     environment:
       - AAC_ENCODER_CONFIG=/app/build/config/config.json
     restart: unless-stopped

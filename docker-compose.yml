@@ -1,14 +1,15 @@
 services:
   aac-encoder:
     image: ghcr.io/asalive1/encoder:latest
+    pull_policy: always   # always pull the latest image on every 'docker compose up'
     network_mode: host    # required for RTP multicast — bridge networking blocks IGMP/multicast
     # With host networking, ports are exposed directly on the host (no mapping needed):
-    #   Web UI:      http://server:8020   (config.json webPort)
-    #   Metadata:    server:9000          (config.json listenPort)
-    #   Control:     server:9010          (config.json controlPort)
+    #   Web UI:      http://server:<webPort>    (config.json webPort)
+    #   Metadata:    server:<listenPort>        (config.json listenPort)
+    #   Control:     server:<controlPort>       (config.json controlPort)
     #   RTP audio:   multicast via rtpInterface in config.json
     volumes:
-      - ./config:/app/build/config
+      - ./config:/app/build/config   # mounted over image defaults — your local config takes precedence
       - ./logs:/app/logs
       - ./HLS:/app/HLS
     environment:

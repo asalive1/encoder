@@ -27,18 +27,19 @@ RUN mkdir -p build && cd build && \
 RUN id -u 1000 >/dev/null 2>&1 || useradd -r -s /bin/false -u 1000 encoder
 
 # Create directories and set permissions
-RUN mkdir -p /app/config /app/logs /app/HLS && \
+# Config lives at /app/build/config — relative to the encoder binary location
+RUN mkdir -p /app/build/config /app/logs /app/HLS && \
     chown -R 1000:1000 /app && \
     chmod -R 755 /app
 
-# Expose web UI port
-EXPOSE 8080
+# Expose web UI port (default webPort in config.json)
+EXPOSE 8020
 
 # Switch to non-root user
 USER 1000
 
-# Set default config via environment variable
-ENV AAC_ENCODER_CONFIG=/app/config/config.json
+# Config path resolved relative to binary dir (/app/build)
+ENV AAC_ENCODER_CONFIG=/app/build/config/config.json
 
-# Default command
-CMD ["./build/encoder", "--headless"]
+# Default command — no --headless so the web UI is available
+CMD ["./build/encoder"]

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <lame.h>
 #include <mutex>
 #include <netdb.h>
@@ -556,6 +557,12 @@ struct HlsState {
     int                 window = 5;
     std::string         dir;      // absolute path to HLS folder
     std::string         playlist; // index.m3u8 path
+
+    // Per-segment metadata snapshot: seq number -> JSON string captured when the segment was written.
+    // This ensures each EXTINF tag carries the metadata that was actually current when that audio
+    // window was encoded, so the Orban 5950 (and similar processors) display the correct "now playing"
+    // rather than whatever happens to be in g_currentMetaJson at playlist-rebuild time.
+    std::map<int, std::string> segmentMeta;
 };
 
 static HlsState g_hls;
@@ -681,19 +688,27 @@ std::string parseMetadataXML(const std::string& xml, const std::string& stationI
     return oss.str();
 }
 
-// Build HLS metadata JSON from XML (ordered keys, numeric duration/start)
+// Build HLS metadata JSON from a batch of <nowplaying> elements sent by the automation system.
+// The automation sends the stack as concatenated <nowplaying> elements (no wrapping root):
+//   - First element (empty/absent stack_pos, air_time set): the "now on air" trigger – same song as stack_pos=0
+//   - stack_pos=0 : currently playing  ← becomes "current"
+//   - stack_pos=1,2,3... : upcoming items ← becomes "upcoming[]"
+// We wrap in a synthetic root so libxml2 can iterate all children at once.
 nlohmann::ordered_json buildHlsMetaJson(const std::string& xml, const std::string& stationId) {
-    nlohmann::ordered_json j; // preserve insertion order
+    nlohmann::ordered_json j;
     try {
-        xmlDocPtr doc = xmlReadMemory(xml.c_str(), (int)xml.size(),
+        // Wrap concatenated elements so the parser sees a single-root document.
+        std::string wrapped = "<_batch_>" + xml + "</_batch_>";
+        xmlDocPtr doc = xmlReadMemory(wrapped.c_str(), (int)wrapped.size(),
                                       "meta.xml", nullptr,
-                                      XML_PARSE_NOERROR | XML_PARSE_NOWARNING);
+                                      XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_RECOVER);
         if (!doc) return j;
-        xmlNode* root = xmlDocGetRootElement(doc);
-        if (!root) { xmlFreeDoc(doc); return j; }
+        xmlNode* batchRoot = xmlDocGetRootElement(doc);
+        if (!batchRoot) { xmlFreeDoc(doc); return j; }
 
-        auto getText = [](xmlNode* root, const char* name)->std::string {
-            for (xmlNode* cur = root->children; cur; cur = cur->next) {
+        // Helper: get text content of a named child element
+        auto getText = [](xmlNode* node, const char* name) -> std::string {
+            for (xmlNode* cur = node->children; cur; cur = cur->next) {
                 if (cur->type == XML_ELEMENT_NODE && xmlStrEqual(cur->name, BAD_CAST name)) {
                     xmlChar* c = xmlNodeGetContent(cur);
                     if (c) {
@@ -706,43 +721,107 @@ nlohmann::ordered_json buildHlsMetaJson(const std::string& xml, const std::strin
             return "";
         };
 
-        std::string type     = getText(root, "media_type");
-        std::string title    = getText(root, "title");
-        std::string artist   = getText(root, "artist");
-        std::string album    = getText(root, "album");
-        std::string duration = getText(root, "duration");
-        std::string cart     = getText(root, "cart");
+        struct NowPlayingItem {
+            std::string stackPos;
+            std::string airTime;
+            std::string type;
+            std::string title;
+            std::string artist;
+            std::string album;   // automation sends album info in <trivia>
+            std::string duration; // milliseconds as string
+            std::string cart;
+        };
 
-        xmlFreeDoc(doc);
-
-        // Normalize duration to seconds (manufacturer expects seconds, not milliseconds)
-        double durSeconds = 0.0;
-        if (!duration.empty()) {
-            try {
-                durSeconds = std::stod(duration);
-                // Heuristic: if value looks like milliseconds, convert to seconds
-                if (durSeconds > 1000.0) durSeconds /= 1000.0;
-            } catch (...) {
-                durSeconds = 0.0;
+        // Collect all <nowplaying> children in document order
+        std::vector<NowPlayingItem> items;
+        for (xmlNode* child = batchRoot->children; child; child = child->next) {
+            if (child->type == XML_ELEMENT_NODE &&
+                xmlStrEqual(child->name, BAD_CAST "nowplaying")) {
+                NowPlayingItem item;
+                item.stackPos = getText(child, "stack_pos");
+                item.airTime  = getText(child, "air_time");
+                item.type     = getText(child, "media_type");
+                item.title    = getText(child, "title");
+                item.artist   = getText(child, "artist");
+                item.album    = getText(child, "trivia");   // <trivia> carries the album/show name
+                item.duration = getText(child, "duration"); // milliseconds
+                item.cart     = getText(child, "cart");
+                items.push_back(std::move(item));
             }
         }
+        xmlFreeDoc(doc);
 
-        // Numeric epoch seconds with fractional part
-        const double startSecs = nowStartEpochSeconds();
+        if (items.empty()) return j;
 
-        // Build "current" object with keys in the exact desired order
-        nlohmann::ordered_json current;
-        current["type"]     = type;
-        current["title"]    = title;
-        current["album"]    = album;
-        current["artist"]   = artist;
-        current["image"]    = "";          // optional
-        current["duration"] = durSeconds;  // numeric
-        current["start"]    = startSecs;   // numeric
-        current["id"]       = cart;
+        // Select current item: prefer stack_pos == "0"; fall back to first with air_time set;
+        // last resort: first element in document order.
+        const NowPlayingItem* current = nullptr;
+        for (const auto& item : items) {
+            if (item.stackPos == "0") { current = &item; break; }
+        }
+        if (!current) {
+            for (const auto& item : items) {
+                if (!item.airTime.empty()) { current = &item; break; }
+            }
+        }
+        if (!current) current = &items[0];
 
-        j["current"]  = current;
-        j["upcoming"] = nlohmann::ordered_json::array();
+        // Collect upcoming items: stack_pos >= 1, sorted numerically
+        std::vector<const NowPlayingItem*> upcomingItems;
+        for (const auto& item : items) {
+            if (item.stackPos.empty()) continue;
+            try {
+                if (std::stoi(item.stackPos) >= 1)
+                    upcomingItems.push_back(&item);
+            } catch (...) {}
+        }
+        std::sort(upcomingItems.begin(), upcomingItems.end(),
+                  [](const NowPlayingItem* a, const NowPlayingItem* b) {
+                      return std::stoi(a->stackPos) < std::stoi(b->stackPos);
+                  });
+
+        // Build a JSON object for one item; startSecs is estimated epoch start time
+        auto makeItem = [](const NowPlayingItem* item, double startSecs) -> nlohmann::ordered_json {
+            double durSeconds = 0.0;
+            if (!item->duration.empty()) {
+                try {
+                    durSeconds = std::stod(item->duration);
+                    // Automation sends milliseconds; convert to seconds
+                    if (durSeconds > 1000.0) durSeconds /= 1000.0;
+                } catch (...) {}
+            }
+            nlohmann::ordered_json o;
+            o["type"]     = item->type;
+            o["title"]    = item->title;
+            o["album"]    = item->album;
+            o["artist"]   = item->artist;
+            o["image"]    = "";
+            o["duration"] = durSeconds;
+            o["start"]    = startSecs;
+            o["id"]       = item->cart;
+            return o;
+        };
+
+        const double nowSecs = nowStartEpochSeconds();
+
+        j["current"] = makeItem(current, nowSecs);
+
+        // Estimate start times for upcoming items by chaining durations
+        nlohmann::ordered_json upcomingArr = nlohmann::ordered_json::array();
+        double nextStart = nowSecs;
+        {
+            // Advance past current item's duration
+            double d = 0.0;
+            try { d = std::stod(current->duration); if (d > 1000.0) d /= 1000.0; } catch (...) {}
+            nextStart += d;
+        }
+        for (const auto* item : upcomingItems) {
+            upcomingArr.push_back(makeItem(item, nextStart));
+            double d = 0.0;
+            try { d = std::stod(item->duration); if (d > 1000.0) d /= 1000.0; } catch (...) {}
+            nextStart += d;
+        }
+        j["upcoming"] = upcomingArr;
 
         logMessage("[metadataServer] HLS JSON metadata: " + j.dump());
 
@@ -1297,75 +1376,107 @@ void metadataServer(int port) {
 
         logMessage("[metadataServer] Client connected on port " + std::to_string(port));
 
+        // Snapshot stationId once per connection (avoids repeated lock)
+        std::string stationId;
+        { std::lock_guard<std::mutex> lock(g_configMutex);
+          stationId = g_config.amperwaveStationId; }
+
+        // Per-connection accumulation buffer.
+        // The automation sends ALL stack items as back-to-back <nowplaying> elements in one burst.
+        // TCP may deliver them in one read() or split across several reads (especially in testing
+        // with nc). We accumulate everything seen within a short "settle" window (100 ms of silence)
+        // before processing, so buildHlsMetaJson always receives the complete batch and can select
+        // stack_pos=0 as current and build upcoming[] from the rest.
+        std::string connBuffer;
+        connBuffer.reserve(16384);
+        bool hasPending = false;
+
+        // Lambda: process whatever is accumulated in connBuffer, then clear it
+        auto processBatch = [&]() {
+            if (connBuffer.empty()) return;
+
+            // Strip leading whitespace; skip if it's not XML
+            size_t first = connBuffer.find_first_not_of(" \r\n\t");
+            if (first == std::string::npos || connBuffer[first] != '<') {
+                // Plain-text path (unchanged behaviour)
+                std::string trimmed = connBuffer;
+                trimmed.erase(0, first == std::string::npos ? trimmed.size() : first);
+                trimmed.erase(trimmed.find_last_not_of(" \r\n\t") + 1);
+                if (!trimmed.empty())
+                    logMessage("[metadataServer] Plain text message received: " + trimmed);
+                connBuffer.clear();
+                hasPending = false;
+                return;
+            }
+
+            // ---------- XML path ----------
+            {
+                std::lock_guard<std::mutex> lock(g_metaMutex);
+                g_currentMetaXml = connBuffer;
+            }
+
+            // Icecast / ICY metadata (pipe-separated; uses only the first <nowplaying> element
+            // because parseMetadataXML already does the right thing for single-element or
+            // multi-element payloads — it stops at the first root element which is the trigger)
+            std::string formatted = parseMetadataXML(connBuffer, stationId);
+            if (!formatted.empty()) {
+                {
+                    std::lock_guard<std::mutex> lock(g_metaMutex);
+                    g_currentMeta = formatted;
+                    g_metaHistory.push_front(formatted);
+                    if (g_metaHistory.size() > 5) g_metaHistory.pop_back();
+                }
+                logMessage("[metadataServer] Icecast Metadata updated: " + formatted);
+
+                // HLS JSON metadata — pass the full batch so current & upcoming are correct
+                auto j = buildHlsMetaJson(connBuffer, stationId);
+                if (!j.empty()) {
+                    std::lock_guard<std::mutex> lock(g_metaMutex);
+                    g_currentMetaJson = j.dump();
+                    logMessage("[metadataServer] HLS JSON metadata updated");
+                } else {
+                    logMessage("[metadataServer] HLS JSON metadata build failed or empty");
+                }
+            }
+
+            connBuffer.clear();
+            hasPending = false;
+        };
+
 struct pollfd pfd{client_fd, POLLIN, 0};
 while (!metaShutdown) {
-    int ret = poll(&pfd, 1, 200); // 200 ms
+    // Use a short poll timeout when data has arrived recently (settle window).
+    // Use the normal 200 ms otherwise (saves CPU while idle).
+    int pollMs = hasPending ? 100 : 200;
+    int ret = poll(&pfd, 1, pollMs);
     if (ret < 0) {
         perror("[metadataServer] poll");
         break;
     }
-    if (ret == 0) continue;
+
+    if (ret == 0) {
+        // Timeout: if we have accumulated data and nothing more arrived within the settle
+        // window, declare the burst complete and process it.
+        if (hasPending) processBatch();
+        continue;
+    }
 
     if (pfd.revents & POLLIN) {
-        std::vector<char> buf(4096);
+        std::vector<char> buf(16384);
         ssize_t n = read(client_fd, buf.data(), buf.size());
-        if (n <= 0) break;
+        if (n <= 0) {
+            // Connection closed or error — flush any pending data first
+            if (hasPending) processBatch();
+            break;
+        }
         if (metaShutdown) {
             logMessage("[metadataServer] Stop requested, aborting client read");
             break;
         }
 
         try {
-            std::string payload(buf.data(), n);
-
-            // Heuristic: treat as XML if it starts with '<'
-            if (!payload.empty() && payload.front() == '<') {
-                // ---------- XML path ----------
-                {
-                    std::lock_guard<std::mutex> lock(g_metaMutex);
-                    g_currentMetaXml = payload;
-                }
-
-                // snapshot stationId
-                std::string stationId;
-                { std::lock_guard<std::mutex> lock(g_configMutex);
-                    stationId = g_config.amperwaveStationId; }
-
-                // pipe-separated for ICY
-                std::string formatted = parseMetadataXML(payload, stationId);
-                if (!formatted.empty()) {
-                    {
-                        std::lock_guard<std::mutex> lock(g_metaMutex);
-                        g_currentMeta = formatted;
-                        g_metaHistory.push_front(formatted);
-                        if (g_metaHistory.size() > 5) g_metaHistory.pop_back();
-                    }
-                    logMessage("[metadataServer] Icecast Metadata updated: " + formatted);
-
-                    // HLS JSON metadata
-                    auto j = buildHlsMetaJson(payload, stationId);
-                    if (!j.empty()) {
-                        std::lock_guard<std::mutex> lock(g_metaMutex);
-                        g_currentMetaJson = j.dump();
-                        logMessage("[metadataServer] HLS JSON metadata updated");
-                    } else {
-                        logMessage("[metadataServer] HLS JSON metadata build failed or empty");
-                    }
-                }
-            } else {
-                // ---------- Plain text path ----------
-                // Trim whitespace so you can see the actual text
-                std::string trimmed = payload;
-                trimmed.erase(0, trimmed.find_first_not_of(" \r\n\t"));
-                trimmed.erase(trimmed.find_last_not_of(" \r\n\t") + 1);
-
-                if (!trimmed.empty()) {
-                    logMessage("[metadataServer] Plain text message received: " + trimmed);
-                } else {
-                    logMessage("[metadataServer] Plain text message received (whitespace only)");
-                }
-                // Do NOT embed into audio streamss
-            }
+            connBuffer.append(buf.data(), n);
+            hasPending = true;
         } catch (const std::exception& e) {
             logMessage(std::string("[metadataServer] Exception: ") + e.what());
         } catch (...) {
@@ -1989,12 +2100,14 @@ void hlsBuildPlaylist(HlsState& hs, int currentSeq, int window, int targetDurati
     Config cfgCopy;
     { std::lock_guard<std::mutex> lock(g_configMutex); cfgCopy = g_config; }
 
-    std::string metaJson, metaXml;
+    std::string fallbackMetaJson;
     if (cfgCopy.hlsMetaEnabled) {
-        std::lock_guard<std::mutex> lock(g_metaMutex);
-        metaJson = g_currentMetaJson;
-        metaXml  = g_currentMetaXml;
-        metaXml = sanitizeXmlForExtinf(metaXml);
+        // Fetch the current global meta as a fallback only (used if a segment has no stored
+        // snapshot, e.g. segments written before this code was deployed).
+        {
+            std::lock_guard<std::mutex> lock(g_metaMutex);
+            fallbackMetaJson = g_currentMetaJson;
+        }
 
         // Only include these tags when metadata is enabled
         pl << "#EXT-X-INDEPENDENT-SEGMENTS\n";
@@ -2021,9 +2134,16 @@ void hlsBuildPlaylist(HlsState& hs, int currentSeq, int window, int targetDurati
         // EXTINF line
         pl << "#EXTINF:" << std::fixed << std::setprecision(3) << segDur;
         if (cfgCopy.hlsMetaEnabled) {
+            // Use the metadata that was current when THIS specific segment was written.
+            // This prevents a newly-arrived "next song" metadata from being stamped onto
+            // segments that are still carrying the previous (currently playing) song.
+            auto metaIt = hs.segmentMeta.find(s);
+            const std::string& segMeta = (metaIt != hs.segmentMeta.end())
+                                         ? metaIt->second
+                                         : fallbackMetaJson;
             pl << ",";
-            if (isSafeMetaForExtinf(metaJson)) {
-                pl << metaJson;
+            if (isSafeMetaForExtinf(segMeta)) {
+                pl << segMeta;
             }
         }
         pl << "\n";
@@ -2070,6 +2190,8 @@ void hlsPurgeOldSegments(HlsState& hs, int currentSeq) {
                 logMessage("[HLS] Failed to purge: " + oldPath);
             }
         }
+        // Also remove the per-segment metadata snapshot so the map doesn't grow unbounded.
+        hs.segmentMeta.erase(s);
     }
     hs.lastPurgedSeq = cutoff;
 }
@@ -2226,6 +2348,14 @@ void hlsThreadFunc() {
                     seqToWrite = g_hls.seq++;
                 }
 
+                // Snapshot current metadata for this specific segment so that
+                // hlsBuildPlaylist can attach the correct "now playing" to each
+                // EXTINF entry rather than the most-recently-received metadata.
+                {
+                    std::lock_guard<std::mutex> lock(g_metaMutex);
+                    g_hls.segmentMeta[seqToWrite] = g_currentMetaJson;
+                }
+
                 hlsWriteSegment(g_hls, seqToWrite, segment);
 
                 // Rebuild playlist for sliding window
@@ -2256,6 +2386,10 @@ void hlsThreadFunc() {
         {
             std::lock_guard<std::mutex> lock(g_hlsCtrlMutex);
             seqToWrite = g_hls.seq++;
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_metaMutex);
+            g_hls.segmentMeta[seqToWrite] = g_currentMetaJson;
         }
         hlsWriteSegment(g_hls, seqToWrite, segment);
         hlsBuildPlaylist(g_hls, seqToWrite, window, targetDurationSec);

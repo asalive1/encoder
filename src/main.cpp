@@ -728,9 +728,10 @@ nlohmann::ordered_json buildHlsMetaJson(const std::string& xml, const std::strin
             std::string type;
             std::string title;
             std::string artist;
-            std::string album;   // automation sends album info in <trivia>
+            std::string album;    // automation sends album info in <trivia>
             std::string duration; // milliseconds as string
             std::string cart;
+            std::string category;
         };
 
         // Collect all <nowplaying> children in document order
@@ -744,9 +745,10 @@ nlohmann::ordered_json buildHlsMetaJson(const std::string& xml, const std::strin
                 item.type     = getText(child, "media_type");
                 item.title    = getText(child, "title");
                 item.artist   = getText(child, "artist");
-                item.album    = getText(child, "trivia");   // <trivia> carries the album/show name
-                item.duration = getText(child, "duration"); // milliseconds
+                item.album    = getText(child, "trivia");    // <trivia> carries the album/show name
+                item.duration = getText(child, "duration");  // milliseconds
                 item.cart     = getText(child, "cart");
+                item.category = getText(child, "category");
                 items.push_back(std::move(item));
             }
         }
@@ -800,6 +802,7 @@ nlohmann::ordered_json buildHlsMetaJson(const std::string& xml, const std::strin
             o["duration"] = durSeconds;
             o["start"]    = startSecs;
             o["id"]       = item->cart;
+            o["category"] = item->category;
             return o;
         };
 

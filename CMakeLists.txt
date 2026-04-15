@@ -3,7 +3,7 @@ project(AACIceEncoderWebUI VERSION 1.0.18)
 
 # Generate a header with version info
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in
-        ${CMAKE_CURRENT_BINARY_DIR}/version.h @ONLY)
+        ${CMAKE_CURRENT_BINARY_DIR}/version_generated.h @ONLY)
 
 set(CMAKE_CXX_STANDARD 17)
 

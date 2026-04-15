@@ -28,7 +28,7 @@
 #include "encoders.h"
 #include "httplib.h"
 #include "json.hpp"
-#include "version.h"
+#include "version_generated.h"
 
 namespace fs = std::filesystem;
 std::string getProgramDir() {

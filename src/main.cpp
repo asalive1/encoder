@@ -238,6 +238,9 @@ static int g_iceSock = -1;
 static int g_iceMetaIntEffective = 0;
 std::atomic<bool> aacRunning{false};
 
+static constexpr auto kIcecastTakeoverTimeout = std::chrono::seconds(60);
+static constexpr auto kIcecastRetryInterval = std::chrono::seconds(2);
+
 // --- MP3 sink globals ---
 static std::atomic<bool> g_iceRunningMp3{false};
 std::atomic<bool> g_mp3StopRequested{false};
@@ -1148,6 +1151,8 @@ static void processControlCommand(const std::string& line, int client_fd) {
             logMessage("[controlServer] HLS disabled by config");
         }
 
+        maybeStopEngineIfIdle();
+
         std::string resp = "START: AAC(" + std::string(okAac ? "ok" : "skip") +
                            ") MP3(" + std::string(okMp3 ? "ok" : "skip") +
                            ") HLS(" + std::string(okHls ? "ok" : "skip") + ")\n";
@@ -1158,11 +1163,12 @@ static void processControlCommand(const std::string& line, int client_fd) {
     if (line == cfgCopy.commandStop) {
         logMessage("[controlServer] Stop command received");
 
-        if (cfgCopy.iceEnabled) stopEncoder();
-        if (cfgCopy.mp3Enabled) stopMp3EncoderWithConfig();
-        if (cfgCopy.hlsEnabled) stopHls();
+        stopEncoder();
+        stopMp3EncoderWithConfig();
+        stopHls();
+        stopAudioEngine();
 
-        const char* resp = "STOP: AAC(ok) MP3(ok) HLS(ok)\n";
+        const char* resp = "STOP: all streams and engine stopped\n";
         (void)write(client_fd, resp, std::strlen(resp));
         return;
     }
@@ -2914,6 +2920,35 @@ bool connectIcecastSourceMp3(const Config& cfg, int& sockfd, int& icyMetaIntOut)
                " (icy-metaint=" + std::to_string(icyMetaIntOut) + ")");
     return true;
 }
+
+template <typename ConnectFn>
+bool connectIcecastWithRetry(const std::string& logPrefix,
+                             ConnectFn connectFn,
+                             int& sockfd,
+                             int& icyMetaIntOut) {
+    const auto deadline = std::chrono::steady_clock::now() + kIcecastTakeoverTimeout;
+    int attempt = 0;
+
+    while (g_running) {
+        ++attempt;
+        if (connectFn(sockfd, icyMetaIntOut)) {
+            return true;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) break;
+
+        const auto remaining = std::chrono::duration_cast<std::chrono::seconds>(deadline - now).count();
+        logMessage(logPrefix + " Connect attempt " + std::to_string(attempt) +
+                   " failed; retrying in " + std::to_string(kIcecastRetryInterval.count()) +
+                   "s (" + std::to_string(remaining) + "s remaining in takeover window)");
+        std::this_thread::sleep_for(kIcecastRetryInterval);
+    }
+
+    logMessage(logPrefix + " Failed to connect within " +
+               std::to_string(kIcecastTakeoverTimeout.count()) + "s takeover timeout");
+    return false;
+}
 //------End MP3 Icecast--------------------
 
 
@@ -3355,8 +3390,15 @@ bool startEncoderWithConfig() {
 
     int sockfd = -1;
     int icyMetaIntUse = 0;
-    if (!connectIcecastSource(cfgCopy, sockfd, icyMetaIntUse)) {
+    if (!connectIcecastWithRetry(
+            "[Icecast-AAC]",
+            [&](int& connectSock, int& connectMetaInt) {
+                return connectIcecastSource(cfgCopy, connectSock, connectMetaInt);
+            },
+            sockfd,
+            icyMetaIntUse)) {
         logMessage("[Icecast-AAC] Failed to connect to Icecast");
+        maybeStopEngineIfIdle();
         return false;
     }
     g_iceSock = sockfd;
@@ -3433,8 +3475,15 @@ bool startMp3EncoderWithConfig() {
 
     int sockfd = -1;
     int icyMetaIntUse = 0;
-    if (!connectIcecastSourceMp3(cfgCopy, sockfd, icyMetaIntUse)) {
+    if (!connectIcecastWithRetry(
+            "[Icecast-MP3]",
+            [&](int& connectSock, int& connectMetaInt) {
+                return connectIcecastSourceMp3(cfgCopy, connectSock, connectMetaInt);
+            },
+            sockfd,
+            icyMetaIntUse)) {
         logMessage("[Icecast-MP3] Failed to connect to Icecast");
+        maybeStopEngineIfIdle();
         return false;
     }
     g_iceSockMp3 = sockfd;

@@ -1,0 +1,13 @@
+{
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/build",
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/vendor/httplib",
+        "${workspaceFolder}/vendor/json",
+        "${workspaceFolder}/vendor/wsserver",
+        "${workspaceFolder}/vendor/asio-master",
+        "${workspaceFolder}/vendor/lame/include"
+    ],
+    "C_Cpp.errorSquiggles": "Disabled"
+}

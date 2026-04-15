@@ -144,6 +144,8 @@ static std::mutex g_logMutex;
 
 bool startMp3EncoderWithConfig();
 bool stopMp3EncoderWithConfig();
+void stopAudioEngine();
+void maybeStopEngineIfIdle();
 
 
 static std::deque<std::string> g_metaHistory;
